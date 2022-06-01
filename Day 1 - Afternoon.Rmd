@@ -1,0 +1,143 @@
+---
+title: "Day 1 - Afternoon"
+author: "Alex Genovese"
+date: "6/1/2022"
+output: html_document
+---
+
+# Estimating the Probability of "Success" and "Failure"
+
+## Inference for Bernoulli/Binomial Probability (Proportion)
+
+### Elements of Bayesian Analysis
+
+Unlike hodge-podge of ad hoc procedures proliferating frequentist methods, there is a unified, straightforward logic:  
+
+> *Everything to be learned from data is captured in the likelihood; the only proper way to process this information is through __Baye's Rule__*
+
+* What are you estimating?  
+  + Parameter(s) or some quantity that can be calculated from parameters
+
+* How should you encode your starting uncertainty (prior)?
+
+* How should you model the data-generating process (likelihood)?
+
+* How can you calculate (or avoid calculating) the marginal likelihood?
+
+### The Simple Case of a (Possibly) Unfair Coin: Binomial Distribution
+
+* __Question__ : If we flip a possibly unfair coin n times, how can we use the outcomes as evidence to estimate the probability of *heads*?
+
+* __Motivation__ : Substitute independent repeated observations of any data-generating process where each instance has only two possible outcomes:
+  + "Success" and "Failure"
+
+* Imagine I have one of these coins in my hand, flip it and get H. How can you incorporate that information (data) in estimating $\theta$?  
+
+$p(\theta|data) = \frac{p(\theta)p(data|\theta)}{p(data)}$
+
+* For each of the possible parameter values, we know the probability that we would have observed *heads*.
+  + That is, we know the probability distribution associated with any $\theta$
+  + What is a probability distribution? Tentative/simplistic version: (a) All possible outcomes of the data-generating process (measurements, observations) and (b) the probability associated with each.
+   
+### One Coin Flip: Heads
+
+* Prior probabilities
+  + 0 to 1 in increments of 0.1
+  + Favoring fair coin slightly
+  + Far less belief in extremely unfair coin than nearly fair
+  
+* Compare *maximum likelihood* estimate to modal posterior estimate
+  + MLE asks what $\theta$ makes the observed data most likely
+  + MAP (max a posteriori) asks which $\theta$ is most plausible in light of the data (and prior) 
+  
+### Binomial Distribution (Number of "successes" on multiple observations)
+
+* Binomial Distribution - probability formula representation
+  + Suppose *N* independent observations (cases, trials) of a process
+  + Assume all observations based on same probability $\theta$
+  + How to calculate the probability of Y = y successes (e.g. heads of coins)?
+
+* N = 2
+  + $\ P(Y=0) = \theta^{0}(1-\theta)^{2}$
+  + $\ P(Y=1) = 2\theta^{1}(1-\theta)^{1}$
+  + $\ P(Y=2) = \theta^{2}(1-\theta)^{0}$
+  
+* Example
+  + $\theta = 0.10$
+  + $\ = 0.10^{0}(0.90^{2}) = 0.81$
+  + $\ = 2(0.10^{1})(0.90^{1}) = 0.18$
+  + $\ = 0.10^{2}(0.90^{0}) = 0.01$
+
+For **fixed** (or known) parameter and varying possible observations (data), we wind up with a probability distribution.
+**Note**: Sums to 1
+
+For fixed (or observed) observations (data), varying possible parameter values, we wind up with a likelihood function
+**Note**: Does not sum to 1
+
+* Binomial Probability Distribution (probability mass function)
+  + $\ p(Y = y|\theta, N) = \frac{N!}{(y!)(N-y)!}\theta^{y}(1-\theta)^{N-y}$ Fixed parameter, varying observations
+  
+* Binomial Likelihood
+  + $\ L(\theta|y, N) = \frac{N!}{(y!)(N-y)!}\theta^{y}(1-\theta)^{N-y}$ Fixed data, varying parameter
+  
+> **EXAMPLE**
+```{r echo=TRUE}
+set.seed(22) ## set seed for replication
+heads <- rbinom(1, 100, 0.5) ## simulate flipping a fair coin 100 times
+heads # 52
+
+biased_prob <- 0.6 ## What is the likelihood that the probability is 0.6?
+choose(100, heads)*(biased_prob**heads)*(1-biased_prob)**48 ## Manual calculation
+# 0.02148776
+dbinom(heads, 100, biased_prob) ## R Calculation
+# 0.02148776
+
+likelihood <- function(p){
+  dbinom(heads, 100, p)
+} ## Function to test likelihood of values of p
+
+likelihood(biased_prob)
+# 0.02148776
+
+negative_likelihood <- function(p){
+  dbinom(heads, 100, p)*-1
+} ## Negative likelihood to maximize the minimizing function, nlm.
+negative_likelihood(biased_prob)
+# -0.02148776 
+
+nlm(negative_likelihood, 0.5, stepmax=0.5)
+# $minimum: -0.07965256 
+## Denotes minimum value of negative likelihood - so the maximum likelihood is this value multiplied by -1
+# $estimate: 0.5199995 
+## MLE Estimate of p
+# $gradient: -2.775558e-11
+## Gradient of the likelihood function in the vicinity of our estimate of p - we would expect this to be very close to zero for a successful estimate
+```
+
+# Markov Chain Monte Carlo (MCMC)
+
+## Simulating Draws from a Posterior Distribution
+
+### Bayesian Methods and MCMC
+
+* Metropolis-Hastings
+* Gibbs Sampler (e.g. in BUGS, JAGS)
+* What is Markov Chain Monte Carlo?
+* Limitations of approaches so far
+  + Grid approximation (Provide prior probability for many specific values of $\theta$)
+  + Conjugate Distributions (e.g. Beta and Bernoulli)
+* Suppose you can evaluate prior and likelihood up to a constant
+
+  + $\ p(\theta|data)∝p(\theta)p(data|\theta)$
+
+* The Island-Hopping Politician Metaphor
+  + How to visit islands in archipelago so time spent per island is proportional to island pop.?
+  + When on an island, you only know population of that island and those adjacent.
+
+* Follow this set of rules (algorithm)
+  + Flip a coin to decide which of adjacent islands to propose visiting next
+  + If proposed island has higher pop., go there
+  + If proposed island has lower pop., go there with probability = lowpop/highpop
+  + $\ p_{move} = min (\frac{P(\theta_{proposed})}{P(\theta_{current})})$
+  
+
