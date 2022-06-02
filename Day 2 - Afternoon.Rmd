@@ -1,0 +1,381 @@
+---
+title: "Day 2 - Afternoon"
+author: "Alex Genovese"
+date: "6/2/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(rstan)
+```
+
+
+# Bayes Binomial Model Comparison
+
+```{r Binomial Model Comparison, eval=FALSE, include=FALSE}
+par(mfcol=c(1,1),mar=c(5,5.5,1,1))
+#just code to set up the plot window
+
+
+#These are from the "dowsing to
+#  detect homeopathic medicine"
+#  example discussed in the last
+#  section
+
+Nsucc=c(16,9,11,10,13,16)
+#number of successes for each
+#  person
+
+Ntries=rep(26,length(Nsucc))
+#number of tries
+
+pCorr=Nsucc/Ntries
+#proportion correct
+
+#for each person, we want to test the
+#  hypothesis that they have no clue
+#  (.5 chance of getting each trial
+#  correct) against the hypothesis that
+#  they can detect the medicine (something
+#  over .5 chance of being correct)
+
+#We will test this hypothesis by looking
+#  at a Bayes Factor. The Bayes Factor
+#  indicates which hypothesis made a
+#  better prediction for the data as
+#  a multiplicative factor. It does
+#  NOT consider any information about
+#  which hypothesis is likely to be
+#  true outside of the current data set.
+
+#For example, the first participant got
+#  16 of 26 correct. We could get the
+#  likelihood of this outcome for any
+#  hypothesized probability of getting
+#  each trial correct. 
+
+dbinom(16,26,.5)
+#For a .5 probability
+# (our null hypothesis)
+
+#In other words, there is about an
+#  8% chance that the person would
+#  get 16 of 26 correct if they
+#  were really just guessing each
+#  time.
+
+#We got that likelihood from a
+#  binomial distribution, which
+#  shows the probability of getting
+#  a certain number of successes
+#  in a certain number of trials
+#  with a certain success rate
+#  on each trial.
+#We had 26 attempts, so we could
+#  have observed anything from 0
+#  to 26 successes
+
+posNsucc = 0:26 
+#possible observed number of successes
+
+#And assuming a .5 success rate
+#  gives the following prediction
+#  distribution for number of
+#  observed successes out of 26
+
+plot(posNsucc,
+     dbinom(posNsucc,26,.5),
+     xlab="Possible Observed Successes",
+     ylab="Predicted Probability",
+     cex=1.5)
+
+abline(v=16)
+#We actually observed 16 successes for
+#  this person, so we get the likelihood
+#  for an observed success rate of .5
+#  by looking at the prediction distribution
+#  at a value of 16.
+
+
+dbinom(16,26,16/26)
+#For the observed success rate (16/26),
+#  we get 0.1591656
+
+#In other words, there is about an
+#  16% chance that the person would
+#  get 16 of 26 correct if they
+#  had a 16/26 chance of getting
+#  it correct each time.
+
+#And assuming a 16/26 success rate
+#  gives the following prediction
+#  distribution for number of
+#  observed successes out of 26
+
+plot(posNsucc,
+     dbinom(posNsucc,26,16/26),
+     xlab="Possible Observed Successes",
+     ylab="Predicted Probability",
+     cex=1.5)
+
+abline(v=16)
+#We actually observed 16 successes for
+#  this person, so we get the likelihood
+#  for an observed success rate of 16/26
+#  by looking at the prediction distribution
+#  at a value of 16.
+
+
+#So the data are twice as consistent
+#  with the observed success rate
+#  than pure guessing:
+
+dbinom(16,26,16/26) / dbinom(16,26,.5)
+
+#meaning we have 2-to-1 evidence against
+#  the null, right? Of course not!
+#  Doing it this way lets the
+#  alternative hypothesis cheat: it
+#  got to see the data and propose
+#  a hypothesized success rate that
+#  exactly matched the data. This
+#  is perhaps the simplest example
+#  of the need to consider model
+#  complexity. Here, one hypothesis
+#  (the alternative) can cover a much
+#  wider range of success rates than
+#  the other (the null), so it is
+#  more complex.
+
+#Bayesian inference has a beautiful
+#  mechanism for considering model
+#  complexity. 
+
+#The alternative hypothesis does not
+#  specify an exact success rate. In
+#  Bayesian inference, this means that
+#  it needs to specify a distribution
+#  representing the uncertainty about
+#  the success rate under the 
+#  alternative. This plays the role of a 
+#  prior distribution for success rate
+#  under the alternative.
+
+
+#Visualize the prior
+#  lb = lower bound of uniform prior
+#  ub = upper bound
+seePrior=function(lb,ub){
+  par(mfcol=c(1,1),mar=c(5,5.5,1,1))
+  seqTheta=seq(0,1,by=.001)
+  plot(seqTheta,dunif(seqTheta,lb,ub),
+       type="l",xlab="Possible Success Rates",
+       ylab="Prior Credibility",
+       bty="n",cex.axis=1.25,cex.lab=1.25)
+  abline(h=0,col="gray")
+}
+
+#As an example, we could propose that all
+#  success rates between .5 and 1 are
+#  equally plausible in the prior:
+
+seePrior(.5,1)
+
+#The overall likelihood for the alternative
+#  hypothesis is a weighted average of
+#  the likelihoods from every possible
+#  success rate under the alternative, where
+#  the weights are based on the credibility
+#  assigned to that success rate in the
+#  prior distribution. This is the *marginal*
+#  prediction distribution.
+#You can think of this as pooling a bunch
+#  of conditional prediction distributions
+#  together - all the conditional prediction
+#  distributions for all the possible
+#  probabilities of success that make up
+#  the prior distribution.
+
+#The following function shows marginal
+#  prediction distributions for a
+#  given number of attempts (size) and a
+#  given uniform prior on probability of
+#  success with a given lower and upper 
+#  bound (lb and ub). 
+#  If you enter the same value
+#  for the lower and upper bound of
+#  the uniform prior, then the function
+#  shows a regular binomial distribution.
+
+marPred=function(size=10,lb=0,ub=1){
+  posNsucc = 0:size
+  if(lb==ub){
+    pred=dbinom(posNsucc,size,lb)
+    plot(posNsucc,
+         pred,
+         xlab="Possible Observed Successes",
+         ylab="Predicted Probability",
+         cex=1.5,las=1,bty="n")
+    abline(h=0,col="gray")
+  }
+  if(lb<ub){
+    joint=function(theta,Nsucc) dunif(theta,lb,ub) *
+                          dbinom(Nsucc,size,theta)
+    pred=c()
+    for(Nsucc in posNsucc){
+      pred[Nsucc+1]=integrate(joint,lower=lb,upper=ub,
+                              Nsucc=Nsucc)$val
+    }
+    plot(posNsucc,
+         pred,
+         xlab="Possible Observed Successes",
+         ylab="Predicted Probability",
+         cex=1.5,las=1,bty="n")
+    abline(h=0,col="gray")
+  }
+  
+  names(pred)=paste0("Nsucc=",0:size)
+  return(pred)
+}
+
+
+altPred=marPred(26,.5,1)
+#Predictions for participant 1
+#  from the alternative model
+
+altLikelihood = altPred['Nsucc=16']
+#The likelihood for the alternative
+#  is the marginal prediction for the
+#  number of successes that were actually
+#  observed. This is called a marginal or
+#  integrated likelihood.
+
+nullLikelihood=dbinom(16,26,.5)
+#This is the value that can be compared to
+#  the null likelihood without distorting
+#  results based on differences in model
+#  complexity
+
+BF = altLikelihood / nullLikelihood
+#The likelihood ratio tells us that the
+#  data support the alternative hypothesis
+#  a little less than the null, but it
+#  is close to a toss up. This likelihood
+#  ratio is called a "Bayes Factor" when
+#  at least one of the likelihoods is an
+#  integrated likelihood for a model
+#  that allows a range of parameter
+#  values.
+
+
+#Function to return Bayes Factor and
+#  show plots for null versus alternative.
+#  Input is number of successes, number
+#  of attempts (size), lower and upper 
+#  bound (lb and ub) of prior over success
+#  rate under the alternative hypothesis. 
+#  If you enter the same value
+#  for the lower and upper bound of
+#  the uniform prior, then the function
+#  shows a regular binomial distribution.
+
+getBF=function(Nsucc=5,size=10,lb=0,ub=1){
+  posNsucc = 0:size
+  if(lb==ub){
+    pred=dbinom(posNsucc,size,lb)
+  }
+  if(lb<ub){
+    joint=function(theta,Nsucc) dunif(theta,lb,ub) *
+      dbinom(Nsucc,size,theta)
+    pred=c()
+    for(curNsucc in posNsucc){
+      pred[curNsucc+1]=integrate(joint,lower=lb,upper=ub,
+                              Nsucc=curNsucc)$val
+    }
+  }
+  
+  predNull = dbinom(posNsucc,size,.5)
+  
+  #plot alternative predictions
+  yMax=max(predNull,pred)*1.1
+  par(mfcol=c(1,1),mar=c(5,5,5,1))
+  plot(posNsucc,
+       pred,ylim=c(0,yMax),
+       xlab="Possible Observed Successes",
+       ylab="Predicted Probability",
+       cex=1.5,las=1,bty="n",
+       main="Prediction Distributions for\nNull (triangles) and\nAlternative (circles)")
+  abline(h=0,col="gray")
+  
+  #add in null prediction
+  points(posNsucc,predNull,
+         pch=2,cex=1.5)
+  
+  abline(v=Nsucc,lty=2)
+  #put a line at actual observation. This
+  #  is the level of the prediction distributions
+  #  that defines the likelihood values.
+  
+  #get likelihoods
+  
+  altLik = pred[Nsucc+1]
+  nullLik = dbinom(Nsucc,size,.5)
+  
+  BFnull = nullLik/altLik
+  BFalt = altLik/nullLik
+  
+  print(paste0("BF null/alt = ",round(BFnull,3)))
+  print(paste0("BF alt/null = ",round(BFalt,3)))
+  
+  BF=c(BFnull,BFalt)
+  return(BF)
+}
+```
+
+# Bayesian t-tests in the Bayes Factor package
+
+
+## Regular Old t-test
+The t statistic tells you how far a sample statisitic is from a hypothesized population value in units of the sample-estimated standard error of the statistic.
+$t = \frac{M-\mu}{S_{M}}$
+
+$S_{M} = \frac{S}{\sqrt{N}}$
+
+When some assumptions hold, the t statistic follows a definable distribution, the t distribution.
+
+Many people test only 1 hypothesized population value, which they call the Null hypothesis. This hypothesized value is used to compute t, and we make a rule for how far t has to be from zero to reject the null.
+
+* Single sample: 
+  + Test population mean with sample mean
+  + Standardized effect size is mean of scores minus the hypothesized comparison value divided by the standard deviation of scores.
+  + $\frac{M-\mu}{S}$
+  
+* Dependent samples: 
+  + Test population mean of difference scores with sample mean of difference scores.
+  + Same w/difference scores.
+  + Same as single-sample subbing difference scores for raw scores.
+  
+* Independent samples: 
+  +Test different between population means with difference between sample means.
+  + Standardized effect size is difference between means minus the hypothesized comparison value divided by shared standard deviation.
+  + $\frac{(M_{1}-M_{2})-\mu_{DIFF}}{S_{DIFF}}$
+  
+  
+## Bayes Factor (BF)
+Bayes factor - relative probability of observed data under alternative theoretical claims - likelihood ratio
+How much better one hypothesis predicted data than another as a multiple.
+Used when comparing models that can take on different parameter values. 
+Posterior odds = Prior odds x Bayes Factor
+ex. Say we have two groups, each with 30 scores. The comparison distribution is a t distribution with (30-1)+(30-1) = 58 degrees of freedom.
+We need the predictions for the alternative hypothesis.
+If you know the exact effect size that would hold under the alternative hypothesis, you can get a likelihood with a non-central t distribution. 
+We tend to see t distributions based on an effect size of zero, but you can actually put in any non-centrality parameter you like for other effect sizes.
+dt(1,58,2) gives the probability density at a value of 1 for a t distribution with 57 degrees of freedom and a non-centrality parameter of 2.
+Standardized Effect Sizes:
++ Single sample/Dependent Samples: $ncp = es x \sqrt{N}$ (N is number of difference score for dependent)
++ Independent samples: $ncp = \frac{es}{\sqrt{\frac{1}{N_{1}}+\frac{1}{N_{2}}}}$
+
+The Cauchy distribution (i.e., a t distribution with 1 df) is a commonly used default prior on effect size.
+If another distribution represents your knowledge better, then use that one. But tell everyone BEFORE you collect data by pre-registering your prior. If you didn't do that, then it makes sense to hold you to the default. 

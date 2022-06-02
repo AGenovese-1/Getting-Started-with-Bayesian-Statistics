@@ -6,10 +6,6 @@ output: html_document
 ---
 # Stan
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> 647e06d871f48a887328448950a9be96b3a62a07
 ```{r include = FALSE}
 rm(list=ls())
 library(rstan)
@@ -20,14 +16,20 @@ Stan is broken into blocks:
 * **Model**  
   + **Binomial Model**: (A,B, beta) = Plausible values of $\theta$ before I look at any data. Beta prior with parameters A,B ~ ($\theta$, Bernoulli) = Probability of getting a heads (or 1), with $\theta$ being the probability of getting a heads (e.g. P(H) = $\theta$, P(T) = 1-$\theta$) ~ ($\ y_{i}$) = [TTHTTTHH...] where y is a vector and i is the index (i = [1,2,3,4...])
   
-```{r}
+  
+> **R Example** 
+
+```{r Setup}
 n_iter <- 50000 ## Number of iterations per chain
 n_warmup <- 200 # Keeping 5000-200=4800 samples per chain
 n_chains <- 4 ## How many samples to "skip"
 n_thin <- 1 ## We're using ll the samples from our chain after warm up.
 ## n_thin = 10 would mean that we're keeping every 10th sample (4800/10=480 per chain)
 n_cores <- n_chains ## Only if you have a multicore machine for running chains in parallel, only worth it for complex models, otherwise slower. If your computer can't utilize parallel processing: n_cores <- 1
+```
 
+
+```{r Stan R example, eval=FALSE, include=FALSE}
 # =================================================
 # Single coin from a single mint (scsm) ============
 # =================================================
@@ -150,8 +152,298 @@ points(h, mean(y_scsm), cex=2, col='red', pch=16)
 legend(x='topright', legend=c('y_pred', 'y'), cex=1.5, col=c('dark gray', 'red'), pch=c(15, 16), bty='n')
 ```
  
-<<<<<<< HEAD
-=======
-=======
->>>>>>> 98fbaf9f83cb2ae38abdefd7716d891690abc446
->>>>>>> 647e06d871f48a887328448950a9be96b3a62a07
+ 
+# Hierachical binomial I
+
+```{r mcsm_k, eval=FALSE, include=FALSE}
+# =====================================================================
+# Multiple coins from a single mint, fixed kappa (mcsm_k) 
+# =====================================================================
+
+# Generate some data ++++++++++++++++++++++++
+
+# Number of coins
+Nc_mcsm_k <- 5
+# Flips per coin
+# It can be different for each coin
+Nf_mcsm_k <- rep(20, Nc_mcsm_k) 
+
+# The mode of the mint biases
+# This is what we're trying to recover
+omega_mcsm_k <- .2 
+# Determines the uncertainty of the mint biases (lower = more uncertain)
+kappa_mcsm_k <- 10 
+
+# Probability of heads for each coin
+theta_mcsm_k <- rbeta(Nc_mcsm_k, 
+                      omega_mcsm_k*(kappa_mcsm_k - 2) + 1, 
+                      (1 - omega_mcsm_k)*(kappa_mcsm_k - 2) + 1)
+theta_mcsm_k
+mean(theta_mcsm_k)
+
+# The coin flips
+# Nc x Nf
+# Stan doesn't allow missing data, so fill with 0s and skip these in the model.
+y_mcsm_k <- matrix(0, nrow = Nc_mcsm_k, ncol = max(Nf_mcsm_k)) 
+for (c in 1:Nc_mcsm_k) {
+  y_mcsm_k[c,] <- sample(c(0,1), 
+                         Nf_mcsm_k[c], 
+                         replace=TRUE, 
+                         prob=c(1 - theta_mcsm_k[c], theta_mcsm_k[c]))
+}
+y_mcsm_k
+theta_mcsm_k
+
+# The input to Stan
+data_list_mcsm_k <- list( Nf = Nf_mcsm_k, 
+                          Nc = Nc_mcsm_k, 
+                          y = y_mcsm_k) 
+data_list_mcsm_k
+
+# Compile code to create dynamic shared object (DSO) ++++++++++++++++++++++++
+# stan_dso_mcsm_k <- stan_model( file = 'multiple_coins_single_mint_fixed_kappa.stan' )
+# save('stan_dso_mcsm_k', file = 'stan_dso_mcsm_k.RData') # Save it to load faster later
+load(file = 'stan_dso_mcsm_k.RData') # Load a saved model
+
+# Generate Monte Carlo samples ++++++++++++++++++++++++
+stan_fit_mcsm_k <- sampling( object = stan_dso_mcsm_k,
+                             data = data_list_mcsm_k,
+                             chains = n_chains,
+                             iter = n_iter,
+                             warmup = n_warmup,
+                             thin = n_thin,
+                             cores = n_cores)
+
+# Look at results ++++++++++++++++++++++++
+
+# Diagnostics ---------------------
+
+# Chain mixing
+stan_trace(stan_fit_mcsm_k, pars = c('theta', 'omega'))
+
+# Autocorrelation
+stan_ac(stan_fit_mcsm_k, pars = c('theta', 'omega'))
+
+# Ratio of effective sample size to total sample size.
+# You want this to be close to 1, definitely > .10.
+stan_ess(stan_fit_mcsm_k, pars = c('theta'))
+stan_ess(stan_fit_mcsm_k, pars = c('omega'))
+
+# Ratio of Monte Carlo standard error to posterior standard deviation 
+#   for the estimated parameters
+# Want mcse less than 10% of the posterior standard deviation.
+stan_mcse(stan_fit_mcsm_k, pars = c('theta'))
+stan_mcse(stan_fit_mcsm_k, pars = c('omega'))
+
+# Rhat statistic
+# The ratio of the average variance of samples within each chain to the 
+#   variance of the pooled samples across chains; if all chains are at equilibrium, 
+#   these will be the same and R̂ will be one.
+# You want Rhat to be less than 1 (recommended < 1.05)
+stan_rhat(stan_fit_mcsm_k, pars = c('theta'))
+stan_rhat(stan_fit_mcsm_k, pars = c('omega'))
+
+# Kernel density estimates
+stan_dens(stan_fit_mcsm_k, pars = c('theta', 'omega'), separate_chains = TRUE, alpha = 0.3)
+
+# Posteriors ---------------------
+
+# Numeric output 
+print(stan_fit_mcsm_k, pars = c('theta', 'omega') )
+summary(stan_fit_mcsm_k, pars = c('theta', 'omega') )[[1]]
+
+stan_plot(stan_fit_mcsm_k, pars = c('theta', 'omega'))
+stan_plot(stan_fit_mcsm_k, pars = c('theta', 'omega'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+
+# Histgrams
+# Prior & posterior
+stan_hist(stan_fit_mcsm_k, pars = c('theta_prior[1]', 'theta[1]'), bins = 30)
+stan_hist(stan_fit_mcsm_k, pars = c('theta_prior[2]', 'theta[2]'), bins = 30)
+stan_hist(stan_fit_mcsm_k, pars = c('theta_prior[3]', 'theta[3]'), bins = 30)
+stan_hist(stan_fit_mcsm_k, pars = c('theta_prior[4]', 'theta[4]'), bins = 30)
+stan_hist(stan_fit_mcsm_k, pars = c('theta_prior[5]', 'theta[5]'), bins = 30)
+# Note that the priors for the thetas are no longer flat.
+# That is because your best guess for a theta depends on what you know 
+#   about the other thetas.
+stan_hist(stan_fit_mcsm_k, pars = c('omega_prior', 'omega'), bins = 30)
+# The prior for omega, however, is flat.
+
+# A matrix of scatterplots
+# Diagonal = parameter marginal
+# Above diagonal = above median acceptanced samples
+# Below diagonal = below median acceptanced samples
+
+# Priors
+pairs(stan_fit_mcsm_k, pars = c('theta_prior', 'omega_prior'), xlim=c(0,1), ylim=c(0,1))
+# Posteriors
+pairs(stan_fit_mcsm_k, pars = c('theta', 'omega'), xlim=c(0,1), ylim=c(0,1))
+
+# Posterior predictive check ++++++++++++++++++++++++
+
+y_pred_mcsm_k <- extract(stan_fit_mcsm_k, 'y_pred')
+head(y_pred_mcsm_k[[1]])
+dim(y_pred_mcsm_k[[1]])
+
+h <- barplot(colMeans(y_pred_mcsm_k[[1]][,]), xlab='coin', ylab='P(heads)', cex.lab=1.25, ylim=c(0,1))
+points(h, rowMeans(y_mcsm_k), cex=2, col='red', pch=16)
+legend(x='topright', legend=c('y_pred', 'y'), cex=1.5, col=c('dark gray', 'red'), pch=c(15, 16), bty='n')
+```
+
+
+```{r}
+# ====================================================================
+# Multiple coins from a single mint, free kappa (mcsm) 
+# =====================================================================
+# Generate some data 
+
+# Number of coins
+Nc_mcsm <- 5
+# Nc_mcsm <- 50
+
+# Flips per coin
+# It can be different for each coin
+Nf_mcsm <- rep(20, Nc_mcsm) 
+# Nf_mcsm <- rep(1000, Nc_mcsm)
+
+# The mode of the mint biases
+# This is what we're trying to recover
+omega_mcsm <- .2 
+# Determines the uncertainty of the mint biases (lower = more uncertain)
+kappa_mcsm <- 10 
+
+# Probability of heads for each coin
+theta_mcsm <- rbeta(Nc_mcsm, 
+                    omega_mcsm*(kappa_mcsm - 2) + 1, 
+                    (1 - omega_mcsm)*(kappa_mcsm - 2) + 1)
+theta_mcsm
+
+# The coin flips
+# Nc x Nf
+# Stan doesn't allow missing data, so fill with 0s and skip these in the model.
+y_mcsm <- matrix(0, nrow = Nc_mcsm, ncol = max(Nf_mcsm)) 
+for (c in 1:Nc_mcsm) {
+  y_mcsm[c,] <- sample(c(0,1), 
+                       Nf_mcsm[c], 
+                       replace=TRUE, 
+                       prob=c(1 - theta_mcsm[c], theta_mcsm[c]))
+}
+y_mcsm
+
+# The input to Stan
+data_list_mcsm <- list( Nf = Nf_mcsm, 
+                        Nc = Nc_mcsm, 
+                        y = y_mcsm ) 
+data_list_mcsm
+
+# Compile code to create dynamic shared object (DSO) ++++++++++++++++++++++++
+# stan_dso_mcsm <- stan_model( file = 'multiple_coins_single_mint_free_kappa.stan' )
+# save('stan_dso_mcsm', file = 'stan_dso_mcsm.RData') # Save it to load faster later
+load(file = 'stan_dso_mcsm.RData') # Load a saved model
+
+# Initial parameter values ++++++++++++++++++++++++
+
+# Random (default)
+init_params_mcsm <- 'random'
+
+# Hand picked
+# init_params_mcsm <- list(n_chains)
+# # A list of the list of starting values for each chain
+# for (i in 1:n_chains) {
+#   init_params_mcsm[[i]] <- list( omega = omega_mcsm,
+#                                  kappa_minus_two = kappa_mcsm - 2,
+#                                  theta = theta_mcsm)
+# }
+
+# Generate Monte Carlo samples ++++++++++++++++++++++++
+control <- NULL
+# control <- list(adapt_delta = 0.99, max_treedepth = 15)
+stan_fit_mcsm <- sampling( object = stan_dso_mcsm,
+                           data = data_list_mcsm,
+                           chains = n_chains,
+                           iter = n_iter,
+                           warmup = n_warmup,
+                           thin = n_thin,
+                           cores = n_cores,
+                           init = init_params_mcsm,
+                           control = control )
+
+# Look at results ++++++++++++++++++++++++
+
+# Diagnostics ---------------------
+
+# Chain mixing
+stan_trace(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa'))
+# stan_trace(stan_fit_mcsm, pars = c('theta[1]', 'omega', 'kappa'))
+
+# Autocorrelation
+stan_ac(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa'))
+# stan_ac(stan_fit_mcsm, pars = c('theta[1]', 'omega', 'kappa'))
+
+# Ratio of effective sample size to total sample size.
+# You want this to be close to 1, definitely > .10.
+stan_ess(stan_fit_mcsm, pars = c('theta'))
+stan_ess(stan_fit_mcsm, pars = c('omega'))
+stan_ess(stan_fit_mcsm, pars = c('kappa'))
+
+# Ratio of Monte Carlo standard error to posterior standard deviation 
+#   for the estimated parameters
+# Want mcse less than 10% of the posterior standard deviation.
+stan_mcse(stan_fit_mcsm, pars = c('theta'))
+stan_mcse(stan_fit_mcsm, pars = c('omega'))
+stan_mcse(stan_fit_mcsm, pars = c('kappa'))
+
+# Rhat statistic
+# The ratio of the average variance of samples within each chain to the 
+#   variance of the pooled samples across chains; if all chains are at equilibrium, 
+#   these will be the same and R̂ will be one.
+# You want Rhat to be less than 1 (recommended < 1.05)
+stan_rhat(stan_fit_mcsm, pars = c('theta'))
+stan_rhat(stan_fit_mcsm, pars = c('omega'))
+stan_rhat(stan_fit_mcsm, pars = c('kappa'))
+
+# Kernel density estimates
+stan_dens(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa'), separate_chains = TRUE, alpha = 0.3)
+# stan_dens(stan_fit_mcsm, pars = c('theta[1]', 'omega', 'kappa'), separate_chains = TRUE, alpha = 0.3)
+
+# Posteriors ---------------------
+
+# Numeric output 
+print(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa') )
+summary(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa') )[[1]]
+
+stan_plot(stan_fit_mcsm, pars = c('theta', 'omega'))
+stan_plot(stan_fit_mcsm, pars = c('kappa'))
+stan_plot(stan_fit_mcsm, pars = c('theta', 'omega'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+stan_plot(stan_fit_mcsm, pars = c('kappa'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+
+# Histgrams
+# Prior & posterior
+stan_hist(stan_fit_mcsm, pars = c('theta_prior[1]', 'theta[1]'))
+stan_hist(stan_fit_mcsm, pars = c('theta_prior[2]', 'theta[2]'))
+stan_hist(stan_fit_mcsm, pars = c('theta_prior[3]', 'theta[3]'))
+stan_hist(stan_fit_mcsm, pars = c('theta_prior[4]', 'theta[4]'))
+stan_hist(stan_fit_mcsm, pars = c('theta_prior[5]', 'theta[5]'))
+stan_hist(stan_fit_mcsm, pars = c('omega_prior', 'omega'))
+stan_hist(stan_fit_mcsm, pars = c('kappa_prior', 'kappa'))
+
+# A matrix of scatterplots
+# Problematic samples: 
+#   Yellow = max treedepth hit (problem of efficiency)
+#   Red = divergent transition (problem of accuracy - more serious)
+# The region of the posterior around a divergent transition is difficult to explore. 
+# Try changing adapt_delta, max_treedepth
+#   control = list(adapt_delta = 0.99, max_treedepth = 15)
+
+# Priors
+pairs(stan_fit_mcsm, pars = c('theta_prior', 'omega_prior', 'kappa_prior'))
+# Posteriors
+pairs(stan_fit_mcsm, pars = c('theta', 'omega', 'kappa'))
+
+# Posterior predictive check ++++++++++++++++++++++++
+
+y_pred_mcsm <- extract(stan_fit_mcsm, 'y_pred')
+h <- barplot(colMeans(y_pred_mcsm[[1]][,]), xlab='coin', ylab='P(heads)', cex.lab=1.25, ylim=c(0,1))
+points(h, rowMeans(y_mcsm), cex=2, col='red', pch=16)
+legend(x='topright', legend=c('y_pred', 'y'), cex=1.5, col=c('dark gray', 'red'), pch=c(15, 16), bty='n')
+```
+
