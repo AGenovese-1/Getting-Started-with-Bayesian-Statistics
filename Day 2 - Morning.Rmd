@@ -1,0 +1,8 @@
+---
+title: "Day 2 - Morning"
+author: "Alex Genovese"
+date: "6/2/2022"
+output: html_document
+---
+# Stan
+
