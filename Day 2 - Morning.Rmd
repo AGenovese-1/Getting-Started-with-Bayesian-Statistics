@@ -1,0 +1,149 @@
+---
+title: "Day 2 - Morning"
+author: "Alex Genovese"
+date: "6/2/2022"
+output: html_document
+---
+# Stan
+
+```{r include = FALSE}
+rm(list=ls())
+library(rstan)
+```
+
+Stan is broken into blocks:  
+
+* **Model**  
+  + **Binomial Model**: (A,B, beta) = Plausible values of $\theta$ before I look at any data. Beta prior with parameters A,B ~ ($\theta$, Bernoulli) = Probability of getting a heads (or 1), with $\theta$ being the probability of getting a heads (e.g. P(H) = $\theta$, P(T) = 1-$\theta$) ~ ($\ y_{i}$) = [TTHTTTHH...] where y is a vector and i is the index (i = [1,2,3,4...])
+  
+```{r}
+n_iter <- 50000 ## Number of iterations per chain
+n_warmup <- 200 # Keeping 5000-200=4800 samples per chain
+n_chains <- 4 ## How many samples to "skip"
+n_thin <- 1 ## We're using ll the samples from our chain after warm up.
+## n_thin = 10 would mean that we're keeping every 10th sample (4800/10=480 per chain)
+n_cores <- n_chains ## Only if you have a multicore machine for running chains in parallel, only worth it for complex models, otherwise slower. If your computer can't utilize parallel processing: n_cores <- 1
+
+# =================================================
+# Single coin from a single mint (scsm) ============
+# =================================================
+
+# Generate some data
+# Usually you'd use real data!
+# We're generating data so we know what theta actually is.
+
+Nf_scsm <- 20 # Coin flips
+Nh_scsm <- .2*Nf_scsm # Number of heads (not proportion of heads)
+
+y_scsm <- c( rep(1, Nh_scsm), rep(0, Nf_scsm - Nh_scsm) ) # The coin flips
+y_scsm # <- Our simulated data set (order doesn't matter)
+
+data_list_scsm <- list( Nf = Nf_scsm, y = y_scsm) # The input to Stan
+data_list_scsm # Consistent with the slides, y is our data
+
+# Compile code to create dynamic shared object (DSO) 
+
+# Either compile and save the model (can take a model)
+# stan_dso_scsm <- stan_model(file = 'single_coin_single_mint.stan')
+# save('stan_dso_scsm', file = 'stan_dso_scsm.RData') # Save it to load faster later
+
+# OR if you already have a saved model you can just load it
+load(file = 'stan_dso_scsm.RData') # Load a saved model
+
+# Generate Monte Carlo samples +++++++++++++++++++++
+stan_fit_scsm <- sampling( object = stan_dso_scsm,
+                           data = data_list_scsm,
+                           chains = n_chains,
+                           iter = n_iter,
+                           warmup = n_warmup,
+                           thin = n_thin,
+                           cores = n_cores)
+stan_fit_scsm
+
+# Look at results ++++++++++++++++++++++++
+
+# Diagnostics ---------------------
+
+# Chain mixing
+# Note the first 200 warmups are missing
+# You want a fuzzy catepillar!
+stan_trace(stan_fit_scsm, pars = c('theta')) 
+# traceplot(stan_fit_scsm, pars = c('theta')) # same thing
+
+# Autocorrelation
+stan_ac(stan_fit_scsm, pars = c('theta'))
+stan_ac(stan_fit_scsm, pars = c('theta'), separate_chains = TRUE)
+
+# Ratio of effective sample size to total sample size.
+# You want this to be close to 1, definitely > .10.
+# This graph will make more sense when there is more than one variable.
+stan_ess(stan_fit_scsm, pars = c('theta'))
+# If you have high autocorrelation or low ess, you'll need more samples to 
+#   get a good estimation of the posterior, but, 
+#   you can keep all of these samples. 
+# Thinning doesn't produce a better estimation, it just reduces your file size,
+#   which can get very large.
+
+# Ratio of Monte Carlo standard error to posterior standard deviation 
+#   for the estimated parameters
+# Essentially, this is the posterior standard deviation / sqrt(effective sample size).
+# Want mcse less than 10% of the posterior standard deviation (roughly).
+stan_mcse(stan_fit_scsm, pars = c('theta'))
+# For reference (skip for now)
+sd_theta <- summary(stan_fit_scsm, pars = c('theta'))[[1]][3]
+neff_theta <- summary(stan_fit_scsm, pars = c('theta'))[[1]][9]
+sd_theta/sqrt(neff_theta)
+
+# Rhat statistic
+# The ratio of the average variance of samples within each chain to the 
+#   variance of the pooled samples across chains; if all chains are at equilibrium, 
+#   these will be the same and R̂ will be one.
+# You want Rhat to be less than 1 (recommended < 1.05)
+stan_rhat(stan_fit_scsm, pars = c('theta'))
+
+# Posteriors ---------------------
+
+# Numeric output 
+print(stan_fit_scsm, pars = c('theta') )
+summary(stan_fit_scsm, pars = c('theta'))
+
+stan_plot(stan_fit_scsm, pars = c('theta'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+stan_plot(stan_fit_scsm, pars = c('theta'))
+
+# Histgrams
+# Prior & posterior
+stan_hist(stan_fit_scsm, pars = c('theta_prior', 'theta'), bins = 30)
+
+# Samples ++++++++++++++++++++++++
+
+# Extracting the theta samples
+samps <- extract(stan_fit_scsm, par = 'theta', permuted = FALSE) # Samps is a list
+dim(samps) # # of iterations * # of chains * # of parameters
+dim(samps) # # of iterations * # of chains * # of parameters
+samps[1:10,,1] 
+
+stan_fit_scsm
+
+# Examples of how to use the samples.
+hist(samps[,,1], xlab='theta', main='')
+summary(stan_fit_scsm, pars = c('theta'))[[1]]
+mean(samps[,,1])
+median(samps[,,1])
+sd(samps[,,1])
+quantile(samps[,,1], probs=c(.025, .25, .50, .75, .975))
+quantile(samps[,,1], probs=c(.10, .90))
+
+# Posterior predictive check ++++++++++++++++++++++++
+# What if I ran the experiemnt again, what does the model predict you will see,
+#   if you use our new, "reasonable" guess for the parameter values?
+# Compare to the data you got. Hopefully it looks similar.
+y_pred_scsm <- extract(stan_fit_scsm, 'y_pred')[[1]]
+head(y_pred_scsm)
+length(y_pred_scsm)
+n_chains * (n_iter - n_warmup)
+
+h <- barplot(mean(y_pred_scsm), xlab='coin', ylab='P(heads)', cex.lab=1.25, ylim=c(0,1))
+points(h, mean(y_scsm), cex=2, col='red', pch=16)
+legend(x='topright', legend=c('y_pred', 'y'), cex=1.5, col=c('dark gray', 'red'), pch=c(15, 16), bty='n')
+```
+ 
