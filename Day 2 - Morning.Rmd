@@ -6,6 +6,7 @@ output: html_document
 ---
 # Stan
 
+<<<<<<< HEAD
 ```{r include = FALSE}
 rm(list=ls())
 library(rstan)
@@ -147,3 +148,5 @@ points(h, mean(y_scsm), cex=2, col='red', pch=16)
 legend(x='topright', legend=c('y_pred', 'y'), cex=1.5, col=c('dark gray', 'red'), pch=c(15, 16), bty='n')
 ```
  
+=======
+>>>>>>> 98fbaf9f83cb2ae38abdefd7716d891690abc446
