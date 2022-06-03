@@ -1,0 +1,161 @@
+---
+title: "Day 3 - Afternoon"
+author: "Alex Genovese"
+date: "6/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Bayesian t-tests in the Bayes Factor package
+## Bayes Factor (BF)
+* Bayes factor: relative probability of observed data under alternative theoretical claims
+* Likelihood ratio
+* How much better one hypothesis predicted data than other as a multiple.
+* "Bayes factor" is used when comparing models that can take on different parameter values.
+* So, a Bayes Factor involves at least one integrated likelihood. 
+* Different parameter values are associated with different likelihoods.
+* Integrate over possible parameter values to get single likelihood representing the ability of the model to predict the data
+* The Bayes Factor isn't the posterior odds or probability of a hypothesis. To find that you also need the prior odds/proability.
+  +**Posterior odds = Prior odds x Bayes Factor**
+
+## Definitions
+* Odds - how many times more likely one thing is than another
+* Prob. = Odds/(Odds+1)
+
+## Bayes Factor (2)
+* Say you run a new experiment with no previous commitment about whether the null or hypothesis is true.
+* Prior odds(Alt:Null) = 1:1 (or just 1)
+* You analyze data and get a Bayes Factor of 6
+* Posterior odds = 1x6=6
+* Posterior probability that alt. is true = 6/(6+1)=0.86
+* So one way to interpret the Bayes Factor is that it's the odds that the alternative is true if the only information you have is the data from the analyzed experiment.
+* install.packages('BayesFactor')
+* Examples and Explanation: https://richarddmorey.github.io/BayesFactor/#Liangetal
+* Help: https://cran.r-project.org/web/packages/BayesFactor/BayesFactor.pdf
+* Uses "default" priors
+  + "Default" means you don't know much about expected effect sizes, correlations, etc.
+  + For effect size, basically gives you priors that are reasonable if all you know is that data are from a psychology experiment.
+
+## Bayesian t test
+* Example:
+  + Say we have two groups, each with 30 scores.
+  + The comparison distribution is a t distribution with (30-1)+(30-1) = 58 degrees of freedom
+* If you know the exact effect size that would hold under the alternative hypothesis, you can get a likelihood with a non-central t distribution.
+* We always see t distributions based on an effect size of zero, but you can actually put in any non-centrality parameter you like for other effect sizes.
+* In R, the t functions have an argument for the non-centrality parameter.
+  + For example, dt(1,58,2) gives the probability density at a value of 1 for a t distribution with 58 degrees of freedom and a non-centrality parameter of 2.
+* It's nicer to think about standardized effect sizes (Cohen's d in this case), so here's how to get non-centrality parameters (ncp) from the effect size(es).
+  + Single sample/Dependent samples: $ncp = es*\sqrt{N}$ (N is number of difference scores for dependent)
+  + Indendent samples: $ncp = \frac{es}{\sqrt{\frac{1}{N_{1}}+\frac{1}{N_{2}}}}
+* But you might say, "I don't know what the effect size is!"
+  + Well, take your best guess. Create a probability distribution that is a good representation of likely effect sizes based on your knowledge.
+* The Bayes factor package defines the uses a prior distribution on effect size under the alt. hypothesis that represents this minimal knowledge.
+* If another distribution represents your knowledge better, then use that one.
+  + But tell everyone BEFORE you collect data by pre-registering your prior. 
+  + If you didn’t do that, then it makes sense to hold you to the default.
+* To get the likelihood of a certain t value for a distribution of possible effect sizes, you average the likelihood over all possible effect sizes.
+  + This is a weighted average, because the effect sizes you think are more likely should have more influence.
+  + The prior distribution gives the weights.
+* Mathematically:
+  + $lik(t) = \int_{-Inf}^{Inf}pri(e)lik(t|e)de$
+  + e = effect size, pri = prior distribution density, lik = likelihood
+
+## R Code
+```{r BayesFactor}
+library('BayesFactor')
+ cindbf = function(d1,d2,rscale){
+   n1=length(d1)
+   n2=length(d2)
+   tval=as.numeric(t.test(d1,d2,var.equal=T)$stat)
+   df = (n1-1)+(n2-1)
+   nlik = dt(tval,df,0)
+   pri = function(es) dt(es/rscale,1)/rscale
+   lik = function(es) dt(tval,df,es/sqrt(1/n1+1/n2))
+   wlik = function(es) pri(es)*lik(es)
+   alik = suppressWarnings(  integrate(wlik,-Inf,Inf)$val )
+   bf = alik/nlik
+   if(bf>=1) print(paste("BF =",round(bf,2)))
+   if(bf<1) print(paste("BF = 1 /",round(1/bf,2)))
+   
+   #plotting code
+   par(mfcol=c(1,1))
+   
+   # different from alik and nlik above because they are here functions that can take any value
+   nlik = function(tval) dt(tval,df)
+   alik = function(tval,rscale){
+     alik = rep(0,length(tval))
+     for(ii in 1:length(alik)){
+       pri = function(es) dt(es/rscale,1)/rscale
+       lik = function(es) dt(tval[ii],df,es/sqrt(1/n1+1/n2))
+       wlik = function(es) pri(es)*lik(es)
+       alik[ii] = suppressWarnings( integrate(wlik,-Inf,Inf)$val )
+     }
+     return(alik)
+   }
+   xrng = max(5,ceiling(tval))
+   xx=seq(-xrng,xrng,length.out=200)
+   ymax=dt(0,df)+dt(0,df)*.3
+   plot(xx,nlik(xx),type='l',ylim=c(0,ymax),main="",xlab="t value",
+        ylab="Probability Density",las=1,lwd=2)
+   points(xx,alik(xx,rscale),type='l',col="red",lwd=2)
+   abline(v=tval,lwd=2)
+   abline(v=qt(.025,df),lty=2,col="blue",lwd=2)
+   abline(v=qt(.975,df),lty=2,col="blue",lwd=2)
+   abline(h=0)
+   
+   return(bf)
+ }
+ 
+#randomly sample some data with a specified effect size (standard deviation units)
+es = 0
+d1=rnorm(300,es)
+hist(d1)
+d2=rnorm(300)
+hist(d2)
+
+plot(d1,d2)
+
+
+#Rigs data to produce a certain t value
+rigStat=function(tvalTar=1,compVal=0){
+   n1=length(d1)
+   n2=length(d2)
+   df1=length(d1)-1
+   df2=length(d2)-1
+   dfTot=df1+df1
+   s2pooled=(df1/dfTot)*var(d1) + 
+      (df2/dfTot)*var(d2)
+   sDiff=sqrt(s2pooled/n1 + s2pooled/n2)
+   tCurrent=((mean(d1)-mean(d2))-compVal)/sDiff
+   miss=tvalTar-tCurrent
+   meanShift=miss*sDiff
+   d1=d1+meanShift
+   return(d1)
+}
+
+#d1=rigStat(-2.1)
+
+# regular t test
+t = t.test(d1,d2,var.equal=T)
+print(t)
+
+ttestBF(d1,d2)
+
+cindbf(d1,d2,sqrt(2)/2)
+
+# True effect size of sample: (mean(d1)-mean(d2))/(sqrt(0.5*var(d1)+0.5*var(d2)))
+```
+
+
+
+
+
+
+
+
+
+
+
