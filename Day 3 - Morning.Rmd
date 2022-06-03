@@ -1,0 +1,639 @@
+---
+title: "Day 3 - Morning"
+author: "Alex Genovese"
+date: "6/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+library(HDInterval)
+library(scatterplot3d)
+library(brms)
+library(rstanarm)
+library(scales)
+```
+
+```{r Setup, include=FALSE}
+# Some constants ++++++++++++++++++++++++
+n_chains <- 4
+n_iter <- 5000
+n_warmup <- 200
+n_thin <- 1
+# Only if you have a mutlicore machine
+# Only worth it for complex models, otherwise slower
+n_cores <- n_chains
+# Read in the data ============================
+d <- read.csv('Admission_Predict_Ver1.1.csv')
+(N <- nrow(d))
+
+# Graphics stuff ++++++++++++++++++++++++
+par(mar=c(5.1, 5.1, 4.1, 3.1))
+```
+# Regression with a constant predictor
+
+## Constant Predictor Model
+
+* $y_{i} = \mu + \epsilon_{i}$ (y=mean+noise) 
+$\epsilon_{i} \sim N(0,\sigma)$ (noise is a normal distribution with 0 mean and sigma standard deviation)
+* **$y_{i} \sim N(\mu,\sigma)$** (y is a normal distribution with a $\mu$ mean and $\sigma$ standard deviation)
+
+```{r Regression with a constant predictor, eval=FALSE, include=FALSE}
+
+# Standardize the continuous variables ========
+# Not strictly needed.
+# In fact, might be counterindicated.
+# Helps keep coefficients in a small, known range.
+# Done here for pedagogical reasons.
+# If not done, set initial parameters to ensure convergence.
+d$TOEFL.Score_Stand <- as.numeric(scale(d$TOEFL.Score))
+d$University.Rating_Stand <- as.numeric(scale(d$University.Rating))
+d$SOP_Stand <- as.numeric(scale(d$SOP))
+d$LOR_Stand <- as.numeric(scale(d$LOR)) 
+d$CGPA_Stand <- as.numeric(scale(d$CGPA)) 
+# How to untransform coefficients
+# https://stats.stackexchange.com/questions/30876/how-to-convert-standardized-coefficients-to-unstandardized-coefficients
+
+# I'm also standardizing the DV, for simplicity
+# Some statisticians might cringe
+d$GRE.Score_Stand <- as.numeric(scale(d$GRE.Score)) 
+
+par(mfrow=c(2,1))
+#hist(d$GRE.Score, xlab='Raw GRE', main='')
+#hist(d$GRE.Score_Stand, xlab='Standardized GRE', main='')
+par(mfrow=c(1,1))
+
+# Explore the data =================================
+head(d)
+str(d)
+summary(d)
+
+panel.hist <- function(x, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(usr[1:2], 0, 1.5) )
+  h <- hist(x, plot = FALSE)
+  breaks <- h$breaks; nB <- length(breaks)
+  y <- h$counts; y <- y/max(y)
+  rect(breaks[-nB], 0, breaks[-1], y, col = "cyan", ...)
+}
+pairs(d[,c(8, 10:15)], lower.panel=NULL, diag.panel=panel.hist)
+
+# =================================================
+# Constant predictor (const) 
+# =================================================
+
+# Handle the data
+
+data_list_const <- list( N = N, y = d$GRE.Score_Stand ) # The input to Stan
+data_list_const
+
+# Compile code to create dynamic shared object (DSO)
+
+# stan_dso_const <- stan_model( file = 'regression_const.stan' )
+# save('stan_dso_const', file = 'stan_dso_const.RData') # Save it to load faster later
+load(file = 'stan_dso_const.RData') # Load a saved model
+
+# ==========================================
+# Generate Monte Carlo samples 
+
+# Initial params
+init_params_const <- 'random' # The default
+# init_params_const <- list(n_chains)
+# for (i in 1:n_chains) {
+#   init_params_const[[i]] <- list( mu = 316,
+#                                   sigma = 10 )
+# }
+# init_params_const
+
+stan_fit_const <- sampling( object = stan_dso_const,
+                            data = data_list_const,
+                            chains = n_chains,
+                            iter = n_iter,
+                            warmup = n_warmup,
+                            thin = n_thin,
+                            cores = n_cores,
+                            init = init_params_const )
+
+# Diagnostics ---------------------
+
+# Chain mixing
+stan_trace(stan_fit_const, pars = c('mu', 'sigma'))
+
+# Autocorrelation
+stan_ac(stan_fit_const, pars = c('mu', 'sigma'))
+
+# Effective sample size
+# Ratio of effective sample size to total sample size.
+# You want this to be close to 1, definitely > .10.
+stan_ess(stan_fit_const, pars = c('mu', 'sigma'))
+
+# Monte Carlo Standard Error
+# The standard error of the mean of the posterior draws. 
+# Want mcse than 10% of the posterior standard deviation.
+stan_mcse(stan_fit_const, pars = c('mu', 'sigma'))
+
+# Rhat statistic
+# The ratio of the average variance of samples within each chain to the 
+#   variance of the pooled samples across chains; if all chains are at equilibrium, 
+#   these will be the same and R̂ will be one.
+# You want Rhat to be less than 1 (recommended < 1.05)
+stan_rhat(stan_fit_const, pars = c('mu', 'sigma'))
+
+# Kernel density estimates
+stan_dens(stan_fit_const, pars = c('mu', 'sigma'), separate_chains = TRUE, alpha = 0.3)
+
+# =================================================
+# Posteriors
+
+# Numeric output 
+print(stan_fit_const, pars = c('mu', 'sigma') )
+mean(d$GRE.Score_Stand)
+sd(d$GRE.Score_Stand)
+summary(stan_fit_const, pars = c('mu', 'sigma') )[[1]]
+
+# Histgrams
+# Priors & Posteriors
+stan_plot(stan_fit_const, pars = c('mu_prior', 'mu'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+stan_plot(stan_fit_const, pars = c('sigma_prior', 'sigma'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+
+stan_hist(stan_fit_const, pars = c('mu_prior', 'mu'), bins = 30)
+stan_hist(stan_fit_const, pars = c('sigma_prior', 'sigma'), bins = 30)
+
+# Posterior predictive check 
+
+# Extract the mcmc samples ---------------------
+
+# y's
+# A complete set of 500 for each mu and sigma
+y_post_const <- extract(stan_fit_const, 'y_pred')[[1]]
+
+# residuals
+# A complete set of 500 for each mu and sigma
+resid_post_const <- extract(stan_fit_const, 'resid')[[1]]
+
+# Generate and graph posterior ---------------------
+
+# y's for 5 representative samples
+par(mfrow=c(3, 2))
+
+#hist(d$GRE.Score_Stand, xlab='gre', 
+     cex.lab=1.25, main='', 
+     prob=TRUE, 
+     xlim=c(-3, 3), 
+     col='green')
+legend(x='topleft', legend=c('y', 'y_pred'), cex=1.5, col=c('green', 'gray'), pch=c(15, 15), lty=c(0,0), bty='n')
+
+for (i in 1:5) {
+  hist(y_post_const[i,], xlab='gre', 
+       cex.lab=1.25, main='', 
+       prob=TRUE, 
+       xlim=c(-3, 3), 
+       col='gray')
+}
+
+par(mfrow=c(1, 1))
+
+# (Boring) Residual plot ---------------------
+
+# residuals for 5 representative samples
+par(mfrow=c(3, 2))
+
+plot(d$GRE.Score_Stand - mean(d$GRE.Score_Stand),
+     xlab='index', ylab='residual',
+     col='green', cex.lab=1.5, cex.axis=1.5, pch=16)
+abline(h=0)
+
+for (i in 1:5) {
+  plot(resid_post_const[i,],
+       xlab='index', ylab='residual',
+       col='gray', cex.lab=1.5, cex.axis=1.5, pch=16)
+  abline(h=0)
+}
+
+par(mfrow=c(1, 1))
+
+```
+
+# Intro to rstanarm
+
+## rstanarm
+
+* rstan+applied regression modeling
+* Develped by the stan team
+* Good for basic to intermediate models
+* Pre-compiled Stan code
+  + Runs very quickly
+  
+```{r rstanarm, eval=FALSE, include=FALSE}
+# ======================================
+# rstanarm
+# ?rstanarm
+
+# Reminder of the standardized GRE scores
+hist(d$GRE.Score_Stand, xlab='Standardized GRE', main='')
+
+# First, with standardized DV for comparison to Stan
+# ~ here mean 'as a function of'
+rstanarm_const_stand <- stan_glm(GRE.Score_Stand ~ 1,
+                                 data=d,
+                                 family = gaussian())
+summary(rstanarm_const_stand, digits=3, probs=c(.025, .5, .975)) # Summary
+print(stan_fit_const, pars = c('mu', 'sigma') ) # From using STAN
+
+# Now, with unstandardized DV
+rstanarm_const_raw <- stan_glm(GRE.Score ~ 1,
+                               data=d,
+                               family = gaussian())
+summary(rstanarm_const_raw, digits=3, probs=c(.025, .5, .975)) # Summary
+
+```
+
+## brms
+* Bayesian regression model
+* Developed in collaboration of stan
+* Good for basic to complex models
+* Not pre-compiled
+  + Slower
+  + More flexible
+
+
+# Bivariate regression
+## One predictor
+
+* $y_{i} = \beta_{0}+\beta_{1}x_{i}+\epsilon_{i}$
+  + $\epsilon \sim N(0,\sigma)$
+  
+* $\mu_{i}=\beta_{0}+\beta_{1}x_{i}$
+
+* **$y_{i} \sim N(\beta_{0}+\beta_{1}x_{i}, \sigma)$**
+
+```{r eval=FALSE, include=FALSE}
+# =================================================
+# Single predictor (1_pred) 
+# =================================================
+
+# Handle the data 
+
+N_subset <- N # N = all data
+data_subset <- sample(1:N, N_subset) # Take a subset, to reduce N, if desired
+data_list_1_pred <- list( N = N_subset, 
+                          y = d$GRE.Score_Stand[data_subset], 
+                          x1 = d$CGPA_Stand[data_subset] ) # The input to Stan
+
+# Compile code to create dynamic shared object (DSO) ++++++++++++++++++++++++
+#stan_dso_1_pred <- stan_model( file = 'regression_1_pred.stan')
+#save('stan_dso_1_pred', file = 'stan_dso_1_pred.RData') # Save the model
+load('stan_dso_1_pred.RData') # Load a saved model
+
+# Generate Monte Carlo samples ++++++++++++++++++++++++
+
+# Initial params
+init_params_const <- 'random' # The default
+# init_params_const <- list(n_chains)
+# for (i in 1:n_chains) {
+#   init_params_const[[i]] <- list( b0 = 100,
+#                                   b1 = 200,
+#                                   sigma = 10 )
+# }
+# init_params_const
+
+stan_fit_1_pred <- sampling( object = stan_dso_1_pred,
+                             data = data_list_1_pred,
+                             chains = n_chains,
+                             iter = n_iter,
+                             warmup = n_warmup,
+                             thin = n_thin,
+                             cores = n_cores,
+                             init = init_params_const)
+
+# Diagnostics 
+# Chain mixing
+stan_trace(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Autocorrelation
+stan_ac(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Effective sample size
+# Ratio of effective sample size to total sample size.
+# You want this to be close to 1, definitely > .10.
+stan_ess(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Monte Carlo Standard Error
+# The standard error of the mean of the posterior draws. 
+# Want mcse than 10% of the posterior standard deviation.
+stan_mcse(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Rhat statistic
+# The ratio of the average variance of samples within each chain to the 
+#   variance of the pooled samples across chains; if all chains are at equilibrium, 
+#   these will be the same and R̂ will be one.
+# You want Rhat to be less than 1 (recommended < 1.05)
+stan_rhat(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Kernel density estimates
+stan_dens(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'), separate_chains = TRUE, alpha = 0.3)
+
+# Posteriors ---------------------
+
+# Numeric output 
+print(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma') )
+summary(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma') )[[1]]
+
+# Histograms
+stan_plot(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+
+# Compare to OLS regression
+lm_1_pred <- lm(GRE.Score_Stand[data_subset] ~ CGPA_Stand[data_subset], data=d)
+summary(lm_1_pred)
+confint(lm_1_pred)
+print(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma') )
+
+# Histgrams
+# Priors & Posteriors
+stan_plot(stan_fit_1_pred, pars = c('b0_prior', 'b0'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+stan_plot(stan_fit_1_pred, pars = c('b1_prior', 'b1'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+stan_plot(stan_fit_1_pred, pars = c('sigma_prior', 'sigma'), point_est = "mean", show_density = TRUE, fill_color = "maroon")
+
+# Scatterplot of samples
+# Priors
+pairs(stan_fit_1_pred, pars = c('b0_prior', 'b1_prior', 'sigma_prior'))
+# Posteriors
+pairs(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma'))
+
+# Posterior predictive check ++++++++++++++++++++++++
+
+# Extract the mcmc samples ---------------------
+x_post_1_pred <- extract(stan_fit_1_pred, 'x_pred')[[1]]
+y_post_1_pred <- extract(stan_fit_1_pred, 'y_pred')[[1]]
+
+# y's for 5 representative samples
+par(mfrow=c(3, 2), pty='s')
+
+plot(d$CGPA_Stand, d$GRE.Score_Stand, 
+     xlab='cgpa', ylab='gre', 
+     cex.lab=1.25, main='', 
+     xlim=c(-3, 3), 
+     col='green')
+legend(x='topleft', legend=c('y', 'y_pred'), cex=1.5, col=c('green', 'gray'), pch=c(16, 16), lty=c(0,0), bty='n')
+
+for (i in 1:5) {
+  plot(x_post_1_pred[i,], y_post_1_pred[i,], 
+       xlab='cgpa', ylab='gre', 
+       cex.lab=1.25, main='', 
+       xlim=c(-3, 3), 
+       col='gray')
+}
+
+par(mfrow=c(1, 1), pty='m')
+
+# Extract the mcmc samples ---------------------
+mu_post_1_pred <- as.numeric(extract(stan_fit_1_pred, 'mu')[[1]])
+b0_post_1_pred <- as.numeric(extract(stan_fit_1_pred, 'b0')[[1]])
+b1_post_1_pred <- as.numeric(extract(stan_fit_1_pred, 'b1')[[1]])
+sigma_post_1_pred <- as.numeric(extract(stan_fit_1_pred, 'sigma')[[1]])
+
+# How many mc samples are there
+(n_1_pred <- length(b0_post_1_pred))
+
+# Variability in regression prediction ---------------------
+plot(d$CGPA_Stand[data_subset], d$GRE.Score_Stand[data_subset],
+     xlab='college GPA', ylab='GRE',
+     cex.lab=1.4)
+
+# Median regression line
+# Note: Parameters are evaluated independently
+abline(a=median(b0_post_1_pred), b=median(b1_post_1_pred), lwd=5, col='blue')
+
+# Distributions of lines
+# 20 samples from posterior
+for (i in 1:20) {
+  abline(a=b0_post_1_pred[i], b=b1_post_1_pred[i], col=alpha("blue", .3))
+}
+
+# Credible intervals ---------------------
+plot(d$CGPA_Stand[data_subset], d$GRE.Score_Stand[data_subset],
+     xlab='college GPA', ylab='GRE',
+     cex.lab=1.4)
+
+# Median regression line
+abline(a=median(b0_post_1_pred), b=median(b1_post_1_pred), lwd=5, col='blue')
+
+# For the mean
+
+# mu_link determines the predicted mean mu for a given cgpa
+# We could also do this within Stan (see generated quantities)
+mu_link_1_pred <- function(cgpa) b0_post_1_pred + b1_post_1_pred*cgpa 
+mu_link_1_pred(-1.5)[1:10]
+b0_post_1_pred[1] + b1_post_1_pred[1]*-1.5
+
+# The range of cpga to consider
+cgpa_seq <- seq(from = -5, to = 5, by = .1)
+cgpa_seq[1:10]
+
+# Sample of mu for each cgpa
+mu_seq_1_pred <- sapply(cgpa_seq, mu_link_1_pred)
+mu_seq_1_pred[1:3, 1:10] # row=mcmc sample, col=mu sample for each cgpa
+
+# Mean of mu for each cgpa
+mu_mean_1_pred <- apply(mu_seq_1_pred, 2, mean)
+mu_mean_1_pred[1:10] # Mean of all of the samples for that cgpa
+mean(mu_seq_1_pred[,1])
+
+# Highest posterior density interval for mu for each cgpa
+mu_hpdi_1_pred <- apply(mu_seq_1_pred, 2, hdi, prob=.95)
+hdi(mu_seq_1_pred[,36], prob=.95) # At cgpa = -1.5
+
+# Draws the shaded region
+# 95% HDI
+polygon(c(cgpa_seq, rev(cgpa_seq)), 
+        c(mu_hpdi_1_pred[2,], rev(mu_hpdi_1_pred[1,])), 
+        col=alpha('blue', .3))
+
+# For new gre values
+
+# new_gre_link_1_pred samples a set of new values for a given cgpa
+new_gre_link_1_pred <- function(cgpa) {
+  rnorm(
+    n = n_1_pred,
+    mean = b0_post_1_pred + b1_post_1_pred*cgpa,
+    sd = sigma_post_1_pred
+  )
+}
+new_gre_link_1_pred(-1.5)[1:10]
+
+# Calls new_value_link for each cgpa
+new_gre <- sapply(cgpa_seq, new_gre_link_1_pred)
+new_gre[1:3, 1:10] # row=mcmc sample, col=new value sample for each cgpa
+
+# Highest posterior density interval for the new values for each cgpa
+new_gre_hdpi <- apply(new_gre, 2, hdi, prob=.95)
+hdi(new_gre_hdpi[,36], prob=.95) # At cgpa = -1.5
+
+# Draws the shaded region
+# 95% HDI
+polygon(c(cgpa_seq, rev(cgpa_seq)), 
+        c(new_gre_hdpi[2,], rev(new_gre_hdpi[1,])), 
+        col=alpha('blue', .15))
+
+# A legend
+legend(x='bottomright',
+       legend=c('data', 'median mu', 'HDPI for mean gre', 'HDPI for new gre'),
+       pch=c(1, 15, 15, 15), 
+       col=c('black', 'blue', alpha('blue', .3), alpha('blue', .15)),
+       bty='n',
+       cex=1.5)
+
+# rstanarm ++++++++++++++++++++++++
+
+# Unstandardized
+rstanarm_1_pred <- stan_glm(GRE.Score ~ CGPA,
+                            data=d)
+summary(rstanarm_1_pred, digits=3, probs=c(.025, .5, .975)) # Summary
+
+# Fit Diagnostics 
+#   mean_PPD
+#   The sample average posterior predictive distribution of the outcome. 
+#   This is useful as a quick diagnostic.
+#   A useful heuristic is to check if mean_PPD is plausible when compared to mean(y).
+mean(d$GRE.Score)
+# If it is plausible then this does not mean that the model is good,
+#   only that it can reproduce the sample mean, 
+#   however if mean_PPD is implausible then it is a sign that something is wrong.
+
+# Other
+#   mean_PPD: mean of the posterior predictive distribution (hopefully on par 
+#     with the mean of the target variable).
+#   log-posterior: similar to the log-likelihood from maximum likelihood, but 
+#     for the Bayesian case.
+
+# Diagnostics ----------------
+
+print(rstanarm_1_pred)
+posterior_interval(rstanarm_1_pred, prob = 0.95) # Posterior intervals
+plot(rstanarm_1_pred, pars='(Intercept)') # On different plots b/c scales are so different
+plot(rstanarm_1_pred, pars='sigma')
+
+plot(rstanarm_1_pred, "trace") # Chains
+plot(rstanarm_1_pred, "dens") # Posterior densities
+plot(rstanarm_1_pred, "pairs") # Scatterplots
+plot(rstanarm_1_pred, "scatter", pars=c('(Intercept)', 'CGPA')) # Only used for exactly 2 parameters
+plot(rstanarm_1_pred, "neff") # neff
+plot(rstanarm_1_pred, "rhat") # rhat
+plot(rstanarm_1_pred, "acf") # Autocorrelation
+plot(rstanarm_1_pred, "areas", prob = 0.95, prob_outer = 1)
+plot(rstanarm_1_pred, "areas", pars=c('CGPA'), prob = 0.95, prob_outer = 1)
+
+summary(residuals(rstanarm_1_pred)) # Residuals
+
+# Posterior predictive check ----------------
+
+posterior_predict(rstanarm_1_pred) # Posterior samples
+posteriorSamples <- as.matrix(rstanarm_1_pred, pars='CGPA')
+head(posteriorSamples)
+hist(posteriorSamples)
+mean(posteriorSamples > 15) # P(CGPA > 15)
+
+pp_check(rstanarm_1_pred, nreps = 100) 
+pp_check(rstanarm_1_pred, plotfun = "boxplot", nreps = 100, notch = FALSE)
+pp_check(rstanarm_1_pred, plotfun = "hist", nreps = 6)
+pp_check(rstanarm_1_pred, plotfun = "stat_2d", stat = c("mean", "sd"))
+pp_check(rstanarm_1_pred, plotfun = "scatter_avg") 
+pp_check(rstanarm_1_pred, plotfun = "scatter", nreps = 6)
+pp_check(rstanarm_1_pred, plotfun = "intervals")
+pp_check(rstanarm_1_pred, plotfun = "error_hist", nreps = 6)
+
+# Shinystan!!! ----------------
+# All-in-one COOL!
+
+launch_shinystan(rstanarm_1_pred) 
+
+# Priors ----------------
+
+prior_summary(rstanarm_1_pred)
+# Automatically mean centers predictors!
+# Adjusted scale values are the prior scales actually used by rstanarm
+#   and are computed by adjusting the prior scales specified by the user 
+#   to account for the scales of the predictors 
+
+# Intercept = N(0, 10*sy)
+10*sd(d$GRE.Score)
+# Coefficents = N(0, 2.5*sy/sx)
+2.5 * sd(d$GRE.Score)/sd(d$CGPA)
+# Sigma = exp(1/sy)
+1/sd(d$GRE.Score)
+
+# New HORRIBLE priors (to show how things go wrong)
+my_coef_prior <- normal(location = c(-100), 
+                        scale = c(.01), 
+                        autoscale = FALSE)
+my_int_prior <- normal(location = c(100), 
+                       scale = c(.01), 
+                       autoscale = FALSE)
+my_aux_prior <- exponential(10,
+                            autoscale = FALSE)
+rstanarm_1_pred_prior <- stan_glm(GRE.Score ~ CGPA,
+                                  data=d,
+                                  family = gaussian(),
+                                  prior = my_coef_prior,
+                                  prior_intercept = my_int_prior,
+                                  prior_aux = my_aux_prior)
+summary(rstanarm_1_pred_prior, digits = 3)
+
+prior_summary(rstanarm_1_pred_prior)
+
+# Diagnostics look ok
+plot(rstanarm_1_pred_prior, "trace") # Chains 
+plot(rstanarm_1_pred_prior, "neff") # neff
+plot(rstanarm_1_pred_prior, "rhat") # rhat
+plot(rstanarm_1_pred_prior, "acf") # Autocorrelation
+plot(rstanarm_1_pred_prior, "areas", prob = 0.95, prob_outer = 1)
+
+# Posterior predictive looks not ok
+pp_check(rstanarm_1_pred_prior, nreps = 10) 
+pp_check(rstanarm_1_pred_prior, plotfun = "boxplot", nreps = 10, notch = FALSE) # Not so good
+pp_check(rstanarm_1_pred_prior, plotfun = "scatter_avg") 
+pp_check(rstanarm_1_pred_prior, plotfun = "error_hist", nreps = 6)
+
+# BRM ++++++++++++++++++++++++
+
+brm_1_pred <- brm(GRE.Score ~ CGPA, 
+                  data=d, 
+                  family="gaussian")
+posterior_summary(brm_1_pred) 
+print(stan_fit_1_pred, pars = c('b0', 'b1', 'sigma') )
+plot(conditional_effects(brm_1_pred), points = TRUE, rug = TRUE)
+
+# Priors ---------------------
+
+prior_summary(brm_1_pred)
+
+my_prior <- c(prior(student_t(3, 0, 2.5), class = "b"))
+brm_1_pred_prior <- brm(GRE.Score ~ CGPA, 
+                        data=d, 
+                        family="gaussian",
+                        prior=my_prior)
+posterior_summary(brm_1_pred_prior)
+prior_summary(brm_1_pred_prior)
+
+
+
+```
+
+
+# Multiple Regression
+
+# Regression Practice
+```{r}
+d$TOEFL.Score_Stand <- as.numeric(scale(d$TOEFL.Score))
+d$University.Rating_Stand <- as.numeric(scale(d$University.Rating))
+d$SOP_Stand <- as.numeric(scale(d$SOP))
+d$LOR_Stand <- as.numeric(scale(d$LOR)) 
+d$CGPA_Stand <- as.numeric(scale(d$CGPA)) 
+d$GRE_Stand <- as.numeric(scale(d$GRE.Score))
+
+fit <- stan_glm(Chance.of.Admit ~ LOR + GRE.Score + CGPA + TOEFL.Score + Research + University.Rating + SOP, data = d)
+summary(fit)
+
+```
